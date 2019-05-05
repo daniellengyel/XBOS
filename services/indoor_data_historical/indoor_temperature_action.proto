@@ -29,6 +29,9 @@ message Request {
   // The frequency/duration window (e.g., 10s, 15m, 1h)
   // Supported units are: d,h,m,s
   string window = 5;
+
+  // Type of data aggregation - RAW, MEAN, MAX...
+  string aggregation = 6;
 }
 
 // TemperaturePoint are represented as a float per unit (e.g., 45.4 F) starting at a given time

@@ -14,9 +14,10 @@ from datetime import datetime
 from rfc3339 import rfc3339
 import pytz
 
-HOST_ADDRESS = os.environ["INDOOR_DATA_HISTORICAL_HOST_ADDRESS"]
+# HOST_ADDRESS = os.environ["INDOOR_DATA_HISTORICAL_HOST_ADDRESS"]
+HOST_ADDRESS = 'localhost:1234'
 
-def _get_raw_actions(building, zone, pymortar_client, start, end, window_size):
+def _get_raw_actions(building, zone, pymortar_client, start, end, window_size, aggregation):
     """
     TODO how to deal with windows in which two different actions are performed in given zone.
     Note: GETS THE MAX ACTION IN GIVEN INTERVAL.
@@ -28,6 +29,7 @@ def _get_raw_actions(building, zone, pymortar_client, start, end, window_size):
     :param window_size: string with [s, m, h, d] classified in the end. e.g. "1s" for one second.
     :return:
     """
+
     thermostat_action_query = """SELECT ?tstat ?status_point WHERE { 
             ?tstat rdf:type brick:Thermostat .
             ?tstat bf:controls/bf:feeds <http://xbos.io/ontologies/%s#%s> .
@@ -43,9 +45,11 @@ def _get_raw_actions(building, zone, pymortar_client, start, end, window_size):
         definition=thermostat_action_query,
     )
 
+    print(aggregation)
+
     thermostat_action_stream = pymortar.DataFrame(
         name="thermostat_action",
-        aggregation=pymortar.MAX,
+        aggregation=aggregation,
         window=window_size,
         timeseries=[
             pymortar.Timeseries(
@@ -178,11 +182,11 @@ def get_raw_indoor_temperatures(request, pymortar_client):
 
 def get_raw_actions(request, pymortar_client):
     """Returns actions for the given request or None."""
-    print("received action request:", request.building, request.zone, request.start, request.end, request.window)
+    print("received action request:", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
     duration = get_window_in_sec(request.window)
 
     request_length = [len(request.building), len(request.zone), request.start, request.end,
-                      duration]
+                      duration, request.aggregation]
 
     if any(v == 0 for v in request_length):
         return None, "invalid request, empty params"
@@ -195,6 +199,19 @@ def get_raw_actions(request, pymortar_client):
     if request.start + (duration * 1e9) > request.end:
         return None, "invalid request, start date + window is greater than end date"
 
+    pymortar_objects = {
+        'MEAN': pymortar.MEAN,
+        'MAX': pymortar.MAX,
+        'MIN': pymortar.MIN,
+        'COUNT': pymortar.COUNT,
+        'SUM': pymortar.SUM,
+        'RAW': pymortar.RAW
+    }
+
+    agg = pymortar_objects.get(request.aggregation, 'ERROR')
+    if agg == 'ERROR':
+        return None, "invalid aggregation parameter"
+
     start_datetime = datetime.utcfromtimestamp(float(request.start / 1e9)).replace(tzinfo=pytz.utc)
     end_datetime = datetime.utcfromtimestamp(float(request.end / 1e9)).replace(
                                                         tzinfo=pytz.utc)
@@ -203,7 +220,8 @@ def get_raw_actions(request, pymortar_client):
     raw_action_data, err = _get_raw_actions(request.building, request.zone, pymortar_client,
                                                     start_datetime,
                                                     end_datetime,
-                                                    request.window)
+                                                    request.window,
+                                                    agg)
 
     actions = []
 
@@ -211,7 +229,9 @@ def get_raw_actions(request, pymortar_client):
         return None, "No data received from database."
 
     for index, action in raw_action_data.iterrows():
-        actions.append(indoor_temperature_action_pb2.ActionPoint(time=int(index.timestamp() * 1e9), action=action)) # TOOD action being int will be a problem.
+        # TOOD action being int will be a problem.
+        actions.append(indoor_temperature_action_pb2.ActionPoint(time=int(index.timestamp() * 1e9),
+                                                                 action=float(action.values)))
 
     return indoor_temperature_action_pb2.RawActionReply(actions=actions), None
 
