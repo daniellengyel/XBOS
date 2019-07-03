@@ -15,9 +15,21 @@ import xbos_services_getter
 
 import meter_data_historical_pb2
 import meter_data_historical_pb2_grpc
-import os
+import os, sys
+import pandas as pd
+import numpy as np
 
-METER_DATA_HOST_ADDRESS = os.environ["METER_DATA_HISTORICAL_HOST_ADDRESS"]
+import logging
+import traceback
+from pathlib import Path
+
+logging.basicConfig(format='%(asctime)s - %(message)s',
+                    datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
+
+
+METER_DATA_HISTORICAL_HOST_ADDRESS = os.environ["METER_DATA_HISTORICAL_HOST_ADDRESS"]
+METER_DATA_HISTORICAL_DATA_PATH = Path(os.environ["METER_DATA_HISTORICAL_DATA_PATH"])
+BUILDING_ZONE_NAMES_HOST_ADDRESS = os.environ["BUILDING_ZONE_NAMES_HOST_ADDRESS"]
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 
@@ -107,7 +119,7 @@ def get_meter_data(pymortar_client, pymortar_objects, site, start, end,
     return response['data_meter'], map_uuid_sitename
 
 
-def get_historical_data(request, pymortar_client, pymortar_objects):
+def get_historical_data(request, pymortar_client, pymortar_objects, eagle_multipliers):
     """ Get historical meter data using pymortar and create gRPC repsonse object.
 
     Parameters
@@ -144,9 +156,27 @@ def get_historical_data(request, pymortar_client, pymortar_objects):
     if df is None:
         return None, "did not fetch meter data from pymortar for this query"
 
-    if len(df.columns) == 2:
-        df[df.columns[0]] = df[df.columns[0]] + df[df.columns[1]]
+    # Add multiplier for eagle data
+    if request.point_type == "Building_Electric_Meter":
+        if request.building in eagle_multipliers.index:
+            uuid = eagle_multipliers.loc[request.building]['Electric_Meter']
+            multiplier = eagle_multipliers.loc[request.building]['eagle_multiplier']
+            if len(df.columns) == 2 and request.building == "word-of-faith-cc":
+                uuid2 = eagle_multipliers.loc['word-of-faith-cc-2']['Electric_Meter']
+                multiplier2 = eagle_multipliers.loc['word-of-faith-cc-2']['eagle_multiplier']
+                if uuid in df.columns and uuid2 in df.columns:
+                    df[uuid] = df[uuid].fillna(0)*multiplier + df[uuid2].fillna(0)*multiplier2
+                    df = df.drop(columns=[uuid2])
+                    df = df.replace(0.0, np.nan)
+            else:
+                if df.columns[0] == uuid:
+                    df[uuid] = df[uuid]*multiplier
+
+    # word-of-faith-cc has two meters, add them together
+    if len(df.columns) == 2 and request.building == "word-of-faith-cc":
+        df[df.columns[0]] = df[df.columns].sum(axis=1)
         df = df.drop(columns=[df.columns[1]])
+        df = df.replace(0.0, np.nan)
 
     df.columns = ['power']
 
@@ -188,8 +218,8 @@ def get_parameters(request, supported_buildings):
     if request.start >= request.end:
         return "invalid request, start date is equal or after end date."
 
-    if request.building not in supported_buildings:
-        return "invalid request, building not found; supported buildings: " + str(supported_buildings)
+    if request.building not in supported_buildings and request.building != 'orinda-public-library':
+        return "invalid request, building not found; supported buildings: " + str(supported_buildings)+",orinda-public-library"
 
     return None
 
@@ -223,7 +253,7 @@ class MeterDataHistoricalServicer(meter_data_historical_pb2_grpc.MeterDataHistor
         self.pymortar_client = pymortar.Client()
 
         # List of zones in building
-        building_names_stub = xbos_services_getter.get_building_zone_names_stub()
+        building_names_stub = xbos_services_getter.get_building_zone_names_stub(BUILDING_ZONE_NAMES_HOST_ADDRESS)
         self.supported_buildings = xbos_services_getter.get_buildings(building_names_stub)
 
         self.pymortar_objects = {
@@ -234,6 +264,11 @@ class MeterDataHistoricalServicer(meter_data_historical_pb2_grpc.MeterDataHistor
             'SUM': pymortar.SUM,
             'RAW': pymortar.RAW
         }
+        meter_multiplier_path = METER_DATA_HISTORICAL_DATA_PATH / "eagle_multipliers.csv"
+        if not os.path.isfile(str(meter_multiplier_path)):
+            logging.critical("Error: could not find file at: %s" , str(meter_multiplier_path))
+            sys.exit()
+        self.eagle_multipliers = pd.read_csv(str(meter_multiplier_path),index_col="site")
 
     def GetMeterDataHistorical(self, request, context):
         """ RPC.
@@ -259,7 +294,7 @@ class MeterDataHistoricalServicer(meter_data_historical_pb2_grpc.MeterDataHistor
             context.set_details(error)
             return meter_data_historical_pb2.MeterDataPoint()
         else:
-            result, error = get_historical_data(request, self.pymortar_client, self.pymortar_objects)
+            result, error = get_historical_data(request, self.pymortar_client, self.pymortar_objects,self.eagle_multipliers)
             if error:
                 context.set_code(grpc.StatusCode.UNAVAILABLE)
                 context.set_details(error)
@@ -272,7 +307,7 @@ class MeterDataHistoricalServicer(meter_data_historical_pb2_grpc.MeterDataHistor
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     meter_data_historical_pb2_grpc.add_MeterDataHistoricalServicer_to_server(MeterDataHistoricalServicer(), server)
-    server.add_insecure_port(METER_DATA_HOST_ADDRESS)
+    server.add_insecure_port(METER_DATA_HISTORICAL_HOST_ADDRESS)
     server.start()
     try:
         while True:
