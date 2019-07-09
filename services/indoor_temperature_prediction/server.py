@@ -140,9 +140,9 @@ def get_error(request):
 
     thermal_model, column_order = THERMAL_MODELS[request.building][request.zone]
     if request.action != -1:
-        filter = train_X["action"] == request.action
-        train_X = train_X[filter]
-        train_y = train_y[filter]
+        filter_arr = train_X["action"] == request.action
+        train_X = train_X[filter_arr]
+        train_y = train_y[filter_arr]
 
     if train_X.shape[0] == 0:
         return None, "Not enough data for given action to get error."

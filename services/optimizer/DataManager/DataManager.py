@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 
 import xbos_services_getter as xsg
+from .local_thermal_model.ThermalModel import ThermalModel
 
 
 def check_data_zones(zones, data_dict, start, end, window):
@@ -107,7 +108,7 @@ class DataManager:
         # outdoor temperatures
         if "outdoor_temperature" not in non_controllable_data:
             outdoor_historic_stub = xsg.get_outdoor_temperature_historic_stub()
-            self.outdoor_temperature = xsg.get_outdoor_temperature_historic(outdoor_historic_stub, self.building,
+            self.outdoor_temperature = xsg.get_preprocessed_outdoor_temperature(outdoor_historic_stub, self.building,
                                                                             self.start, self.end, self.window)["temperature"]
         else:
             self.outdoor_temperature = non_controllable_data["outdoor_temperature"]
@@ -128,7 +129,43 @@ class DataManager:
         self.hvac_consumption = {iter_zone: xsg.get_hvac_consumption(hvac_consumption_stub, building, iter_zone)
                                  for iter_zone in self.zones}
 
-        # TODO Prices
+        if "energy_price" not in non_controllable_data:
+            price_stub = xsg.get_price_stub()
+            self.energy_price = xsg.get_price(price_stub, building, "ENERGY", start, end, window)
+        else:
+            self.energy_price = non_controllable_data["energy_price"]
+        err = xsg.check_data(self.energy_price, start, end, window, check_nan=True)
+        if err is not None:
+            raise Exception("Bad energy prices given. " + err)
+
+        self.indoor_temperature_prediction_stub = xsg.get_indoor_temperature_prediction_stub()
+        indoor_historic_stub = xsg.get_indoor_historic_stub()
+
+        # TEMPORARY --------
+
+        self.indoor_temperature_prediction = ThermalModel()
+
+        # ------------
+
+        # get indoor temperature for other zones.
+        if "all_zone_temperature_data" not in non_controllable_data:
+            building_zone_names_stub = xsg.get_building_zone_names_stub()
+            all_zones = xsg.get_zones(building_zone_names_stub, building)
+            self.all_zone_temperature_data = {}
+            for iter_zone in all_zones:
+                # TODO there is an error with the indoor historic service where it doesn't return the full lenght of data.
+                zone_temperature = xsg.get_indoor_temperature_historic(indoor_historic_stub, building, iter_zone, start, end + datetime.timedelta(seconds=xsg.get_window_in_sec(window)),
+                                                                         window)
+                assert zone_temperature['unit'].values[0] == "F"
+                zone_temperature = zone_temperature["temperature"].squeeze()
+                self.all_zone_temperature_data[iter_zone] = zone_temperature.interpolate("time")
+            self.all_zone_temperature_data = pd.DataFrame(self.all_zone_temperature_data)
+        else:
+            self.all_zone_temperature_data = non_controllable_data["all_zone_temperature_data"]
+        err = xsg.check_data(self.all_zone_temperature_data, start, end, window, check_nan=True)
+        if err is not None:
+            raise Exception("Bad indoor temperature data given. " + err)
+
 
     def get_discomfort(self, building, temperature, temperature_low, temperature_high, occupancy):
         discomfort = max(
@@ -137,3 +174,23 @@ class DataManager:
             0
         )
         return occupancy * discomfort
+
+    def get_indoor_temperature_prediction(self, building,
+                                             zone,
+                                          current_time,
+                                             action,
+                                             temperature,
+                                             outdoor_temperature,
+                                             last_temperature,
+                                             curr_other_zone_temperatures):
+        current_time = current_time.replace(microsecond=0)
+
+        current_time_unix = int(current_time.timestamp() * 1e9)
+
+        if isinstance(curr_other_zone_temperatures, pd.DataFrame) or isinstance(curr_other_zone_temperatures, pd.Series):
+            curr_other_zone_temperatures = curr_other_zone_temperatures.to_dict()
+
+        prediction, returned_time, unit, err = self.indoor_temperature_prediction.prediction(building, zone, current_time_unix, action, temperature, last_temperature, outdoor_temperature, curr_other_zone_temperatures, "F")
+        if err is not None:
+            raise Exception(err)
+        return prediction, returned_time, unit

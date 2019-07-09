@@ -4,7 +4,7 @@ import numpy as np
 import xbos_services_getter as xsg
 
 from DataManager.DataManager import DataManager
-from Thermostat import Tstat
+from Thermostat import DigitalTwin
 
 import gym, ray
 from gym.spaces import Box, Discrete, Tuple
@@ -35,13 +35,13 @@ class BuildingEnv(gym.Env):
 
         self.indoor_starting_temperatures = env_config[
             "indoor_starting_temperatures"]  # to get starting temperatures [last, current]
-        self.outdoor_starting_temperature = env_config["outdoor_starting_temperature"]
+        # self.outdoor_starting_temperature = env_config["outdoor_starting_temperature"]
 
-        self.tstats = {}
-        for iter_zone in self.zones:
-            self.tstats[iter_zone] = Tstat(self.building, iter_zone,
-                                           self.indoor_starting_temperatures[iter_zone]["current"],
-                                           last_temperature=self.indoor_starting_temperatures[iter_zone]["last"])
+        self.DigitalTwin = DigitalTwin(self.building, zones,
+                                       {iter_zone: self.indoor_starting_temperatures[iter_zone]["current"] for iter_zone in zones}, start, end, window,
+                                       last_temperatures={iter_zone: self.indoor_starting_temperatures[iter_zone]["last"] for iter_zone in zones},
+                                       non_controllable_data=env_config["non_controllable_data"],
+                                       suppress_not_enough_data_error=True)
 
         assert 60 * 60 % xsg.get_window_in_sec(self.window) == 0  # window divides an hour
         assert (self.end - self.start).total_seconds() % xsg.get_window_in_sec(
@@ -58,10 +58,10 @@ class BuildingEnv(gym.Env):
         # timestep -> do one hot encoding of week, day, hour, window  \approx 4 + 7 + 24 + 60*60 / window
         low_bound = [32] * 2 * len(
             self.zones)  # we could use parametric temperature bounds... for now we will give negative inft reward
-        low_bound += [-100] # for outside temperature we cannot gurantee much
+        # low_bound += [-100] # for outside temperature we cannot gurantee much
 
         high_bound = [100] * 2 * len(self.zones)
-        high_bound += [200]  # for outside temperature we cannot gurantee much
+        # high_bound += [200]  # for outside temperature we cannot gurantee much
 
         low_bound += [0] * (self.num_timesteps + 1)  # total timesteps plus the final timestep which wont be executed
         high_bound += [1] * (self.num_timesteps + 1)  # total timesteps plus the final timestep which wont be executed
@@ -77,9 +77,9 @@ class BuildingEnv(gym.Env):
         self.curr_timestep = 0
 
         for iter_zone in self.zones:
-            self.tstats[iter_zone].reset(self.indoor_starting_temperatures[iter_zone]["current"],
+            self.DigitalTwin.reset(self.indoor_starting_temperatures[iter_zone]["current"], iter_zone,
                                          last_temperature=self.indoor_starting_temperatures[iter_zone]["last"])
-        self.outdoor_temperature = self.outdoor_starting_temperature
+        # self.outdoor_temperature = self.outdoor_starting_temperature
 
         return self.create_curr_obs()  # obs
 
@@ -96,13 +96,13 @@ class BuildingEnv(gym.Env):
 
         # update temperatures
         for i, iter_zone in enumerate(self.zones):
-            self.tstats[iter_zone].next_temperature(action[i])
-            self.outdoor_temperature += np.random.normal()  # TODO we should make a thermostat for the outdoor temperature.
+            self.DigitalTwin.next_temperature(action[i], iter_zone)
+            # self.outdoor_temperature += np.random.normal()  # TODO we should make a thermostat for the outdoor temperature.
 
         # check that in saftey temperature band
         for iter_zone in self.zones:
             curr_safety = self.DataManager.do_not_exceed[iter_zone].iloc[self.curr_timestep]
-            if not (curr_safety["t_low"] <= self.tstats[iter_zone].temperature <= curr_safety["t_high"]):
+            if not (curr_safety["t_low"] <= self.DigitalTwin.temperatures[iter_zone] <= curr_safety["t_high"]):
                 return self.create_curr_obs(), -INF_REWARD, True, {}  # TODO do we want to add info?
 
         # get reward by calling discomfort and consumption model ...
@@ -118,8 +118,8 @@ class BuildingEnv(gym.Env):
             # TODO Check this again since we are a timestep ahead and we want average comfortband and average occupancy over the edge.
             curr_comfortband = self.DataManager.comfortband[iter_zone].iloc[self.curr_timestep]
             curr_occupancy = self.DataManager.occupancy[iter_zone].iloc[self.curr_timestep]
-            curr_tstat = self.tstats[iter_zone]
-            average_edge_temperature = (curr_tstat.temperature + curr_tstat.last_temperature) / 2.
+            average_edge_temperature = (self.DigitalTwin.temperatures[iter_zone] +
+                                        self.DigitalTwin.last_temperatures[iter_zone]) / 2.
 
             discomfort[iter_zone] = self.DataManager.get_discomfort(
                 self.building, average_edge_temperature,
@@ -127,8 +127,8 @@ class BuildingEnv(gym.Env):
                 curr_occupancy)
 
         # Get consumption across edge
-        price = 1  # self.prices.iloc[root.timestep] TODO also add right unit conversion, and duration
-        consumption_cost = {self.zones[i]: price * self.DataManager.hvac_consumption[self.zones[i]][action[i]]
+        energy_price = self.DataManager.energy_price.iloc[self.curr_timestep]["price"] # TODO also add right unit conversion, and duration
+        consumption_cost = {self.zones[i]: energy_price * self.DataManager.hvac_consumption[self.zones[i]][action[i]]
                             for i in range(len(self.zones))}
 
         cost = ((1 - self.lambda_val) * (sum(consumption_cost.values()))) + (
@@ -136,17 +136,19 @@ class BuildingEnv(gym.Env):
         return -cost
 
     def create_curr_obs(self):
-        return self._create_obs(self.tstats, self.outdoor_temperature, self.curr_timestep)
+        return self._create_obs(self.DigitalTwin, self.curr_timestep)
+        # return self._create_obs(self.tstats, self.outdoor_temperature, self.curr_timestep)
 
-    def _create_obs(self, tstats, outdoor_temperature, curr_timestep):
+    # def _create_obs(self, tstats, outdoor_temperature, curr_timestep):
+    def _create_obs(self, DigitalTwin, curr_timestep):
         obs = np.zeros(self.observation_space.low.shape)
         idx = 0
         for iter_zone in self.zones:
-            obs[idx] = tstats[iter_zone].last_temperature
+            obs[idx] = DigitalTwin.last_temperatures[iter_zone]
             idx += 1
-            obs[idx] = tstats[iter_zone].temperature
+            obs[idx] = DigitalTwin.temperatures[iter_zone]
             idx += 1
-        obs[idx] = outdoor_temperature
+        # obs[idx] = outdoor_temperature
         idx += 1
 
         obs[idx + curr_timestep] = 1
@@ -172,7 +174,7 @@ if __name__ == "__main__":
     building = "avenal-animal-shelter"
     zones = ["hvac_zone_shelter_corridor"]
     indoor_starting_temperatures = {iter_zone: {"last": 70, "current": 71} for iter_zone in zones}
-    outdoor_starting_temperature = 60
+    # outdoor_starting_temperature = 60
     unit = "F"
     lambda_val = 0.999
 
@@ -183,8 +185,9 @@ if __name__ == "__main__":
         "building": building,
         "zones": zones,
         "indoor_starting_temperatures": indoor_starting_temperatures,
-        "outdoor_starting_temperature": outdoor_starting_temperature,
+        # "outdoor_starting_temperature": outdoor_starting_temperature,
         "unit": unit,
+        "non_controllable_data": None,
         "lambda_val": lambda_val
     }
 

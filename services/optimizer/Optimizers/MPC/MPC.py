@@ -111,13 +111,19 @@ class MPC:
             self.g.add_node(root, objective_cost=0, best_action=None, best_successor=None)  # no cost as leaf node
             return root
 
-        # check if valid node
-        if not self.safety_check(root):
-            return None
+        # # check if valid node
+        # if not self.safety_check(root):
+        #     return None
 
         self.g.add_node(root, objective_cost=np.inf, best_action=None, best_successor=None)
 
         # creating children, adding corresponding edge and updating root's objective cost
+
+        # data prep for updating temperatures
+        curr_other_zone_temperatures = self.DataManager.all_zone_temperature_data.iloc[root.timestep]
+        for iter_zone_2 in self.zones:
+            curr_other_zone_temperatures[iter_zone_2] = root.temperatures[iter_zone_2]
+
         for action in itertools.product([xsg.NO_ACTION, xsg.HEATING_ACTION, xsg.COOLING_ACTION],
                                         repeat=len(self.zones)):
 
@@ -126,8 +132,34 @@ class MPC:
             zone_actions = {}
             for i in range(len(self.zones)):
                 zone_actions[self.zones[i]] = action[i]
-                temperatures[self.zones[i]] = root.temperatures[self.zones[i]] + \
-                                              1 * (action[i] == 1) - 1 * (action[i] == 2)
+                # temperatures[self.zones[i]] = root.temperatures[self.zones[i]] + \
+                #                               1 * (action[i] == 1) - 1 * (action[i] == 2)
+
+                curr_temperature = root.temperatures[self.zones[i]]
+                last_temperature = curr_temperature
+                for _ in range(3):
+                    # temperatures[self.zones[i]] = np.round(xsg.get_indoor_temperature_prediction(self.DataManager.indoor_temperature_prediction_stub,
+                    #                                                                 self.building,
+                    #                                                                 self.zones[i],
+                    #                                                                 self.start,
+                    #                                                                 action[i],
+                    #                                                                 root.temperatures[self.zones[i]],
+                    #                                                                 self.DataManager.outdoor_temperature.iloc[root.timestep],
+                    #                                                                 root.temperatures[self.zones[i]],
+                    #                                                                 curr_other_zone_temperatures)[0], 2)
+                    new_curr_temperature = self.DataManager.get_indoor_temperature_prediction(self.building,
+                                                                           self.zones[i],
+                                                                           self.start,
+                                                                           action[i],
+                                                                           curr_temperature,
+                                                                           self.DataManager.outdoor_temperature.iloc[
+                                                                               root.timestep],
+                                                                           last_temperature,
+                                                                           curr_other_zone_temperatures)[0]
+                    last_temperature = curr_temperature
+                    curr_temperature = new_curr_temperature
+
+                temperatures[self.zones[i]] = curr_temperature
 
             # Create child node and call the shortest_path recursively on it
             child_node = Node(
@@ -140,6 +172,7 @@ class MPC:
                 continue
 
             # get discomfort across edge
+            is_safe = self.safety_check(root)
             discomfort = {}
             for iter_zone in self.zones:
                 curr_comfortband = self.DataManager.comfortband[iter_zone].iloc[root.timestep]
@@ -147,11 +180,13 @@ class MPC:
                 average_edge_temperature = (root.temperatures[iter_zone] + child_node.temperatures[iter_zone]) / 2.
 
                 discomfort[iter_zone] = self.DataManager.get_discomfort(self.building, average_edge_temperature,
-                    curr_comfortband["t_low"], curr_comfortband["t_high"],
-                    curr_occupancy)
+                                                                        curr_comfortband["t_low"],
+                                                                        curr_comfortband["t_high"],
+                                                                        curr_occupancy) + 1e6 * int(not is_safe) # TODO not have this in objective function?
 
             # Get consumption across edge
-            price = 1  # self.prices.iloc[root.timestep] TODO also add right unit conversion, and duration
+            price = self.DataManager.energy_price.iloc[root.timestep][
+                "price"]  # TODO also add right unit conversion, and duration
             consumption_cost = {self.zones[i]: price * self.DataManager.hvac_consumption[self.zones[i]][action[i]]
                                 for i in range(len(self.zones))}
 
@@ -196,14 +231,14 @@ class MPC:
 
         return path
 
-#     def g_plot(self, zone):
-#         try:
-#             os.remove('mpc_graph_' + zone + '.html')
-#         except OSError:
-#             pass
+    #     def g_plot(self, zone):
+    #         try:
+    #             os.remove('mpc_graph_' + zone + '.html')
+    #         except OSError:
+    #             pass
 
-#         fig = plotly_figure(self.advise_unit.g, path=self.path)
-#         py.plot(fig, filename='mpc_graph_' + zone + '.html', auto_open=False)
+    #         fig = plotly_figure(self.advise_unit.g, path=self.path)
+    #         py.plot(fig, filename='mpc_graph_' + zone + '.html', auto_open=False)
 
     def advise(self, starting_temperatures):
         """Call this function to get best action.

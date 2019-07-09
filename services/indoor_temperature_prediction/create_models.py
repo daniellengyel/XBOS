@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+
 
 import time
 from pathlib import Path
@@ -124,8 +126,8 @@ def get_train_test(building, zone, start, end, prediction_window, raw_data_granu
 
     # which columns to drop for training and testing
     columns_to_drop = ["dt", "action_duration"]
-    if curr_action_timesteps != 0:
-        columns_to_drop.append("action")
+    # if curr_action_timesteps != 0:
+    #     columns_to_drop.append("action")
     if prev_action_timesteps != 0 or prev_action_timesteps == -1:
         columns_to_drop.append("action_prev")  # TODO we might want to use this as a feature. so don't set to -1...
     if not use_occupancy:
@@ -181,8 +183,8 @@ def create_model(building, zone, start, end, prediction_window, raw_data_granula
     :return: trained sklearn.LinearRegression object.
 
     """
-    if method != "OLS":
-        raise NotImplementedError("%s is not supported. Use OLS instead." % method)
+    if method not in ["OLS", "RF"]:
+        raise NotImplementedError("%s is not supported. Use OLS oor RF instead." % method)
 
     train_X, train_y, test_X, test_y, err = get_train_test(building, zone, start, end, prediction_window, raw_data_granularity, train_ratio, is_second_order,
                  use_occupancy,
@@ -194,6 +196,10 @@ def create_model(building, zone, start, end, prediction_window, raw_data_granula
         return None, None, "Not enough data to train the model."
 
     # Make OLS model
-    reg = LinearRegression().fit(train_X, train_y)
+    if method == "OLS":
+        reg = LinearRegression().fit(train_X, train_y)
+    else:
+        reg = RandomForestRegressor().fit(train_X, train_y)
+
     return reg, test_X.columns, None
 

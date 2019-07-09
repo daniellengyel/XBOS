@@ -20,7 +20,7 @@ import xbos_services_getter as xsg
 from Optimizers.MPC.MPC import MPC
 from Optimizers.MPC.MPC import Node
 from DataManager.DataManager import DataManager
-from Thermostat import Tstat
+from Thermostat import DigitalTwin
 
 
 # Simulation Class for MPC. Stops simulation when the current time is equal to the end.
@@ -57,13 +57,14 @@ class SimulationMPC():
 
         self.DataManager = DataManager(building, zones, start, end, window, non_contrallable_data)
 
-        self.tstats = tstats  # dictionary of simulator object with key zone. has functions: current_temperature, next_temperature(action)
+        self.DigitalTwin = DigitalTwin  # dictionary of simulator object with key zone. has functions: current_temperature, next_temperature(action)
 
         self.current_time = start
         self.current_time_step = 0
+        self.total_steps = (self.simulation_end - start)/self.delta_window
 
         self.actions = {iter_zone: [] for iter_zone in self.zones} # {zone: [ints]}
-        self.temperatures = {iter_zone: [self.tstats[iter_zone].temperature] for iter_zone in self.zones} # {zone: [floats]}
+        self.temperatures = {iter_zone: [self.DigitalTwin.temperatures[iter_zone]] for iter_zone in zones} # {zone: [floats]}
 
 
     def step(self):
@@ -75,13 +76,14 @@ class SimulationMPC():
             "comfortband": {iter_zone: self.DataManager.comfortband[iter_zone].loc[start_mpc:end_mpc] for iter_zone in self.zones},
             "do_not_exceed": {iter_zone: self.DataManager.do_not_exceed[iter_zone].loc[start_mpc:end_mpc] for iter_zone in self.zones},
             "occupancy": {iter_zone: self.DataManager.occupancy[iter_zone].loc[start_mpc:end_mpc] for iter_zone in self.zones},
-            "outdoor_temperature": self.DataManager.outdoor_temperature.loc[start_mpc:end_mpc]
+            "outdoor_temperature": self.DataManager.outdoor_temperature.loc[start_mpc:end_mpc],
+            "all_zone_temperature_data": self.DataManager.all_zone_temperature_data.loc[start_mpc:end_mpc]
         }
 
         op = MPC(self.building, self.zones, start_mpc, end_mpc, self.window, self.lambda_val, non_controllable_data=non_controllable_data,
                  debug=False)
 
-        root = Node({iter_zone: self.tstats[iter_zone].temperature for iter_zone in self.zones}, 0)
+        root = Node(self.DigitalTwin.temperatures, 0)
 
         root = op.shortest_path(root)
         best_action = op.g.node[root]["best_action"]
@@ -95,7 +97,7 @@ class SimulationMPC():
 
         for iter_zone in self.zones:
             # advances temperature and saves it
-            self.temperatures[iter_zone].append(self.tstats[iter_zone].next_temperature(best_action[iter_zone]))
+            self.temperatures[iter_zone].append(self.DigitalTwin.next_temperature(best_action[iter_zone], iter_zone))
             self.actions[iter_zone].append(best_action[iter_zone])
 
         return root
@@ -103,16 +105,22 @@ class SimulationMPC():
     def run(self):
         while self.current_time < self.simulation_end:
             self.step()
+            print("Percent done", 100 * self.current_time_step/float(self.total_steps))
+
+            print(self.actions)
+            print(self.temperatures)
 
 
 
 if __name__ == "__main__":
-    forecasting_horizon = "4h"
+    forecasting_horizon = "1h"
 
-    end = datetime.datetime.utcnow().replace(tzinfo=pytz.utc) - datetime.timedelta(
-        seconds=xsg.get_window_in_sec(forecasting_horizon))
-    end = end.replace(microsecond=0)
-    start = end - datetime.timedelta(hours=6)
+    # end = datetime.datetime.utcnow().replace(tzinfo=pytz.utc) - datetime.timedelta(
+    #     seconds=xsg.get_window_in_sec(forecasting_horizon))
+    # end = end.replace(microsecond=0)
+    # start = end - datetime.timedelta(hours=6)
+    start = datetime.datetime(year=2019, month=1, day=1, hour=8).replace(tzinfo=pytz.utc)
+    end = start + datetime.timedelta(hours=24)
 
     print(start)
     print(start.timestamp())
@@ -120,10 +128,20 @@ if __name__ == "__main__":
     zones = ["hvac_zone_shelter_corridor"]
     window = "15m"
     lambda_val = 0.995
-    tstats = {iter_zone: Tstat(building, iter_zone, 75) for iter_zone in zones}
+    DigitalTwin = DigitalTwin(building, zones,
+                              {iter_zone: 86 for iter_zone in
+                               zones}, start, end, window,
+                              last_temperatures={iter_zone: 80 for
+                                                 iter_zone in zones},
+                              suppress_not_enough_data_error=True)
 
-    simulation = SimulationMPC(building, zones, lambda_val, start, end, forecasting_horizon, window, tstats)
+    simulation = SimulationMPC(building, zones, lambda_val, start, end, forecasting_horizon, window, DigitalTwin)
 
+    import pickle
     t = time.time()
     simulation.run()
     print(time.time() - t)
+    print(simulation.actions)
+    print(simulation.temperatures)
+    with open("sim_res.pkl", "wb") as f:
+        pickle.dump(simulation, f)
