@@ -1,7 +1,10 @@
-grpcio==1.20.1
-grpcio-tools==1.16.1
-PyYAML==3.12
-pytz==2019.1
-pymortar==1.0.4
-rfc3339==6.0
+grpcio>=1.12.1
+grpcio-tools>=1.12.1
+PyYAML>=3.12
+pytz>=2018.3
+pandas>=0.24.0
+pymortar>=0.1.0
+numpy>=1.16.4
+rfc3339>=6.0
+pathlib>=1.0.1
 xbos-services-getter>=0.0.2.dev32
