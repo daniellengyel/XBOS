@@ -9,11 +9,11 @@ import xbos_services_getter as xsg
 from .local_thermal_model.ThermalModel import ThermalModel
 
 
-def check_data_zones(zones, data_dict, start, end, window):
+def check_data_zones(zones, data_dict, start, end, window, check_nan=True):
     for zone in zones:
         if zone not in data_dict:
             return "Is missing zone " + zone
-        err = xsg.check_data(data_dict[zone], start, end, window, check_nan=True)
+        err = xsg.check_data(data_dict[zone], start, end, window, check_nan=check_nan)
         if err is not None:
             return err
     return None
@@ -162,9 +162,19 @@ class DataManager:
             self.all_zone_temperature_data = pd.DataFrame(self.all_zone_temperature_data)
         else:
             self.all_zone_temperature_data = non_controllable_data["all_zone_temperature_data"]
-        err = xsg.check_data(self.all_zone_temperature_data, start, end, window, check_nan=True)
+        err = check_data_zones(zones, self.all_zone_temperature_data, start, end, window, check_nan=True)
         if err is not None:
-            raise Exception("Bad indoor temperature data given. " + err)
+            if "Is missing zone" in err:
+                raise Exception("Bad indoor temperature data given. " + err)
+            else:
+                for iter_zone in zones:
+                    err = xsg.check_data(self.all_zone_temperature_data[iter_zone], start, end, window, True)
+                    if "Nan values in data." in err:
+                        self.all_zone_temperature_data[iter_zone][:] = 70
+
+                    else:
+                        raise Exception("Bad indoor temperature data given. " + err)
+
 
 
     def get_discomfort(self, building, temperature, temperature_low, temperature_high, occupancy):

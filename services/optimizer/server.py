@@ -15,7 +15,7 @@ import pytz
 from Optimizers.MPC.MPC import MPC
 from Simulation.Simulation import SimulationMPC
 import xbos_services_getter as xsg
-from Thermostat import Tstat
+from Thermostat import DigitalTwin
 
 
 def get_actions(request,all_buildings,all_zones):
@@ -100,10 +100,16 @@ def get_simulation(request,all_buildings,all_zones):
 
 
     # somewhat inefficient since this could be stored as class var...
-    tstats = {iter_zone: Tstat(request.building, iter_zone, request.starting_temperatures[iter_zone],  suppress_not_enough_data_error=True) for iter_zone in request.zones}
+    # tstats = {iter_zone: Tstat(request.building, iter_zone, request.starting_temperatures[iter_zone],  suppress_not_enough_data_error=True) for iter_zone in request.zones}
+    digital_twin = DigitalTwin(request.building, request.zones,
+                              {iter_zone: request.starting_temperatures[iter_zone] for iter_zone in
+                               request.zones}, d_start, d_end, request.window,
+                              last_temperatures={iter_zone: request.starting_temperatures[iter_zone] for
+                                                 iter_zone in request.zones},
+                              suppress_not_enough_data_error=True)
 
     Simulation_instance = SimulationMPC(request.building, request.zones, request.lambda_val,
-                                        d_start, d_end, request.forecasting_horizon, request.window, tstats)
+                                        d_start, d_end, request.forecasting_horizon, request.window, digital_twin)
 
     Simulation_instance.run()
     actions = Simulation_instance.actions

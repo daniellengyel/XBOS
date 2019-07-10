@@ -26,7 +26,7 @@ from Thermostat import DigitalTwin
 # Simulation Class for MPC. Stops simulation when the current time is equal to the end.
 class SimulationMPC():
 
-    def __init__(self, building, zones, lambda_val, start, end, forecasting_horizon, window, tstats, non_contrallable_data=None):
+    def __init__(self, building, zones, lambda_val, start, end, forecasting_horizon, window, digital_twin, non_contrallable_data=None):
         """
 
         :param building:
@@ -57,7 +57,7 @@ class SimulationMPC():
 
         self.DataManager = DataManager(building, zones, start, end, window, non_contrallable_data)
 
-        self.DigitalTwin = DigitalTwin  # dictionary of simulator object with key zone. has functions: current_temperature, next_temperature(action)
+        self.DigitalTwin = digital_twin  # dictionary of simulator object with key zone. has functions: current_temperature, next_temperature(action)
 
         self.current_time = start
         self.current_time_step = 0
@@ -128,14 +128,14 @@ if __name__ == "__main__":
     zones = ["hvac_zone_shelter_corridor"]
     window = "15m"
     lambda_val = 0.995
-    DigitalTwin = DigitalTwin(building, zones,
+    digital_twin = DigitalTwin(building, zones,
                               {iter_zone: 86 for iter_zone in
                                zones}, start, end, window,
                               last_temperatures={iter_zone: 80 for
                                                  iter_zone in zones},
                               suppress_not_enough_data_error=True)
 
-    simulation = SimulationMPC(building, zones, lambda_val, start, end, forecasting_horizon, window, DigitalTwin)
+    simulation = SimulationMPC(building, zones, lambda_val, start, end, forecasting_horizon, window, digital_twin)
 
     import pickle
     t = time.time()
