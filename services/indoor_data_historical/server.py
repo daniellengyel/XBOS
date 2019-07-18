@@ -130,6 +130,9 @@ def _get_raw_actions(building, zone, pymortar_client, start, end, window_size, a
     if thermostat_action_data is None:
         return None, "did not fetch data from pymortar with query: %s" % thermostat_action_query
 
+    if len(thermostat_action_data.columns != 1):
+        return None, "zero or more than one stream for given query: %s" % thermostat_action_query
+
     return thermostat_action_data, None
 
 def _get_raw_indoor_temperatures(building, zone, pymortar_client, start, end, window_size, aggregation):
@@ -296,6 +299,9 @@ def get_raw_temperature_bands(request, pymortar_client):
 
     setpoints = []
 
+    if len(temperature_bands_data.columns != 2):
+        return None, "zero or more than two streams for given query: %s" % thermostat_action_query
+
     for index, row in temperature_bands_data.iterrows():
         setpoints.append(indoor_data_historical_pb2.Setpoint(time=int(index.timestamp() * 1e9), temperature_low=row.iloc[1], temperature_high=row.iloc[0], unit=unit))
 
@@ -348,6 +354,9 @@ def get_raw_indoor_temperatures(request, pymortar_client):
     if raw_indoor_temperature_data is None:
         return [indoor_data_historical_pb2.TemperaturePoint()], "No data received from database."
 
+    if len(raw_indoor_temperature_data.columns != 1):
+        return None, "zero or more than one stream for given query: %s" % thermostat_action_query
+
     for index, temp in raw_indoor_temperature_data.iterrows():
         temperatures.append(indoor_data_historical_pb2.TemperaturePoint(time=int(index.timestamp() * 1e9), temperature=temp, unit=unit))
 
@@ -399,6 +408,9 @@ def get_raw_modes(request, pymortar_client):
 
     if raw_mode_data is None:
         return [indoor_data_historical_pb2.ModePoint()], "No data received from database."
+
+    if len(raw_mode_data.columns != 1):
+        return None, "zero or more than one stream for given query: %s" % thermostat_action_query
 
     for index, mode in raw_mode_data.iterrows():
         modes.append(indoor_data_historical_pb2.ModePoint(time=int(index.timestamp() * 1e9), mode=float(mode.values))) # TODO mode being int will be a problem.
