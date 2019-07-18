@@ -33,8 +33,8 @@ def get_actions(request,all_buildings,all_zones):
         return None, "invalid request, building name is not valid."
     if any(v == 0 for v in request_length):
         return None, "invalid request, empty params"
-    if request.end > int(time.time() * 1e9):
-        return None, "invalid request, end date is in the future."
+    if request.end > int((time.time()+_ONE_DAY_IN_SECONDS)*1e9):
+        return None, "invalid request, end date is too far in the future, max is 24h from now"
     if request.start >= request.end:
         return None, "invalid request, start date is after end date."
     if request.start < 0 or request.end < 0:
@@ -75,8 +75,8 @@ def get_simulation(request,all_buildings,all_zones):
         return None, "invalid request, building name is not valid."
     if any(v == 0 for v in request_length):
         return None, "invalid request, empty params"
-    if request.end > int(time.time() * 1e9):
-        return None, "invalid request, end date is in the future."
+    if request.end > int((time.time()+_ONE_DAY_IN_SECONDS)*1e9):
+        return None, "invalid request, end date is too far in the future, max is 24h from now"
     if request.start >= request.end:
         return None, "invalid request, start date is after end date."
     if request.start < 0 or request.end < 0:
