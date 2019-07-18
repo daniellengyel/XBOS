@@ -30,6 +30,7 @@ class DataManager:
             - self.outdoor_temperature
             - self.discomfort_stub
             - self.hvac_consumption
+            - self.price
             - self.all_zone_temperatures: pd.df with columns being zone names and values being F temperatures
 
             - self.start
