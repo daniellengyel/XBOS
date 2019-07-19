@@ -30,6 +30,8 @@ class DataManager:
             - self.outdoor_temperature
             - self.discomfort_stub
             - self.hvac_consumption
+            - self.price
+            - self.all_zone_temperatures: pd.df with columns being zone names and values being F temperatures
 
             - self.start
             - self.unix_start
@@ -147,33 +149,49 @@ class DataManager:
 
         # ------------
 
-        # get indoor temperature for other zones.
-        if "all_zone_temperature_data" not in non_controllable_data:
-            building_zone_names_stub = xsg.get_building_zone_names_stub()
-            all_zones = xsg.get_zones(building_zone_names_stub, building)
-            self.all_zone_temperature_data = {}
-            for iter_zone in all_zones:
-                # TODO there is an error with the indoor historic service where it doesn't return the full lenght of data.
-                zone_temperature = xsg.get_indoor_temperature_historic(indoor_historic_stub, building, iter_zone, start, end + datetime.timedelta(seconds=xsg.get_window_in_sec(window)),
-                                                                         window)
-                assert zone_temperature['unit'].values[0] == "F"
-                zone_temperature = zone_temperature["temperature"].squeeze()
-                self.all_zone_temperature_data[iter_zone] = zone_temperature.interpolate("time")
-            self.all_zone_temperature_data = pd.DataFrame(self.all_zone_temperature_data)
-        else:
-            self.all_zone_temperature_data = non_controllable_data["all_zone_temperature_data"]
-        err = check_data_zones(zones, self.all_zone_temperature_data, start, end, window, check_nan=True)
-        if err is not None:
-            if "Is missing zone" in err:
-                raise Exception("Bad indoor temperature data given. " + err)
-            else:
-                for iter_zone in zones:
-                    err = xsg.check_data(self.all_zone_temperature_data[iter_zone], start, end, window, True)
-                    if "Nan values in data." in err:
-                        self.all_zone_temperature_data[iter_zone][:] = 70
+        # +++++++++++++ TODO other zone temps uncomment when wanting to use real thermal model and delete uncommented section
+        #
+        # # get indoor temperature for other zones.
+        # if "all_zone_temperature_data" not in non_controllable_data:
+        #     building_zone_names_stub = xsg.get_building_zone_names_stub()
+        #     all_zones = xsg.get_zones(building_zone_names_stub, building)
+        #     self.all_zone_temperature_data = {}
+        #     for iter_zone in all_zones:
+        #         # TODO there is an error with the indoor historic service where it doesn't return the full lenght of data.
+        #         zone_temperature = xsg.get_indoor_temperature_historic(indoor_historic_stub, building, iter_zone, start, end + datetime.timedelta(seconds=xsg.get_window_in_sec(window)),
+        #                                                                  window)
+        #         assert zone_temperature['unit'].values[0] == "F"
+        #         zone_temperature = zone_temperature["temperature"].squeeze()
+        #         self.all_zone_temperature_data[iter_zone] = zone_temperature.interpolate("time")
+        #     self.all_zone_temperature_data = pd.DataFrame(self.all_zone_temperature_data)
+        # else:
+        #     self.all_zone_temperature_data = non_controllable_data["all_zone_temperature_data"]
+        # err = check_data_zones(zones, self.all_zone_temperature_data, start, end, window, check_nan=True)
+        # if err is not None:
+        #     if "Is missing zone" in err:
+        #         raise Exception("Bad indoor temperature data given. " + err)
+        #     else:
+        #         for iter_zone in zones:
+        #             err = xsg.check_data(self.all_zone_temperature_data[iter_zone], start, end, window, True)
+        #             if "Nan values in data." in err:
+        #                 self.all_zone_temperature_data[iter_zone][:] = 70 # TODO only doing this if interpolation above does not work because everything is nan
+        #             else:
+        #                 raise Exception("Bad indoor temperature data given. " + err)
 
-                    else:
-                        raise Exception("Bad indoor temperature data given. " + err)
+        building_zone_names_stub = xsg.get_building_zone_names_stub()
+        all_zones = xsg.get_zones(building_zone_names_stub, building)
+        temp_pd = pd.Series(data=0, index = pd.date_range(start, end, freq=str(xsg.get_window_in_sec(window)) + "S"))
+        self.all_zone_temperature_data = {iter_zone: temp_pd for iter_zone in all_zones}
+
+        err = check_data_zones(zones, self.all_zone_temperature_data, start, end, window, check_nan=True)
+
+        if err is not None:
+            raise Exception("Bad indoor temperature data given. " + err)
+
+        self.all_zone_temperature_data = pd.DataFrame(self.all_zone_temperature_data)
+
+        # +++++++++++++
+
 
 
 

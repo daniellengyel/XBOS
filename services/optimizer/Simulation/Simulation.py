@@ -77,7 +77,8 @@ class SimulationMPC():
             "do_not_exceed": {iter_zone: self.DataManager.do_not_exceed[iter_zone].loc[start_mpc:end_mpc] for iter_zone in self.zones},
             "occupancy": {iter_zone: self.DataManager.occupancy[iter_zone].loc[start_mpc:end_mpc] for iter_zone in self.zones},
             "outdoor_temperature": self.DataManager.outdoor_temperature.loc[start_mpc:end_mpc],
-            "all_zone_temperature_data": self.DataManager.all_zone_temperature_data.loc[start_mpc:end_mpc]
+            "all_zone_temperature_data": {iter_zone: self.DataManager.all_zone_temperature_data[iter_zone].loc[start_mpc:end_mpc] for iter_zone in self.zones},
+            "price": self.DataManager.energy_price.loc[start_mpc:end_mpc]
         }
 
         op = MPC(self.building, self.zones, start_mpc, end_mpc, self.window, self.lambda_val, non_controllable_data=non_controllable_data,
@@ -119,8 +120,9 @@ if __name__ == "__main__":
     #     seconds=xsg.get_window_in_sec(forecasting_horizon))
     # end = end.replace(microsecond=0)
     # start = end - datetime.timedelta(hours=6)
-    start = datetime.datetime(year=2019, month=1, day=1, hour=8).replace(tzinfo=pytz.utc)
-    end = start + datetime.timedelta(hours=24)
+    start = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).replace(microsecond=0)
+    # start = datetime.datetime(year=2019, month=1, day=1, hour=8).replace(tzinfo=pytz.utc)
+    end = start + datetime.timedelta(hours=23)
 
     print(start)
     print(start.timestamp())
