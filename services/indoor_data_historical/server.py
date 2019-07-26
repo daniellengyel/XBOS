@@ -130,7 +130,7 @@ def _get_raw_actions(building, zone, pymortar_client, start, end, window_size, a
     if thermostat_action_data is None:
         return None, "did not fetch data from pymortar with query: %s" % thermostat_action_query
 
-    if len(thermostat_action_data.columns != 1):
+    if len(thermostat_action_data.columns) != 1:
         return None, "zero or more than one stream for given query: %s" % thermostat_action_query
 
     return thermostat_action_data, None
@@ -299,7 +299,7 @@ def get_raw_temperature_bands(request, pymortar_client):
 
     setpoints = []
 
-    if len(temperature_bands_data.columns != 2):
+    if len(temperature_bands_data.columns) != 2:
         return None, "zero or more than two streams for given request: "
 
     for index, row in temperature_bands_data.iterrows():
@@ -409,7 +409,7 @@ def get_raw_modes(request, pymortar_client):
     if raw_mode_data is None:
         return [indoor_data_historical_pb2.ModePoint()], "No data received from database."
 
-    if len(raw_mode_data.columns != 1):
+    if len(raw_mode_data.columns) != 1:
         return None, "zero or more than one stream for given query"
 
     for index, mode in raw_mode_data.iterrows():
