@@ -360,7 +360,7 @@ def get_raw_indoor_temperatures(request, pymortar_client):
     if raw_indoor_temperature_data is None:
         return [indoor_data_historical_pb2.TemperaturePoint()], "No data received from database."
 
-    if len(raw_indoor_temperature_data.columns != 1):
+    if len(raw_indoor_temperature_data.columns) != 1:
         return None, "zero or more than one stream for given request"
 
     for index, temp in raw_indoor_temperature_data.iterrows():
