@@ -547,7 +547,7 @@ class IndoorDataHistoricalServicer(indoor_data_historical_pb2_grpc.IndoorDataHis
          Sends the indoor action for a given HVAC Zone, within a timeframe (start, end), and a requested window
          An error is returned if there are no actions for the given request
          """
-         try:
+        try:
             raw_actions, error = get_raw_actions(request, self.pymortar_client)
             if raw_actions is None:
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
