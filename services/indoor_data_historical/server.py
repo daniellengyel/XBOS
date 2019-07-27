@@ -12,6 +12,12 @@ from datetime import datetime
 from rfc3339 import rfc3339
 import pytz
 
+import logging
+import traceback
+
+logging.basicConfig(format='%(asctime)s - %(message)s',
+                    datefmt='%d-%b-%y %H:%M:%S', level=logging.INFO)
+
 INDOOR_DATA_HISTORICAL_HOST_ADDRESS = os.environ["INDOOR_DATA_HISTORICAL_HOST_ADDRESS"]
 
 def _get_raw_modes(building, zone, pymortar_client, start, end, window_size, aggregation):
@@ -254,7 +260,7 @@ def _get_raw_temperature_bands(building, zone, pymortar_client, start, end, wind
 
 def get_raw_temperature_bands(request, pymortar_client):
     """Returns temperature setpoints for the given request or None."""
-    print("received request:", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
+    logging.info("received request: %s %s %s %s %s %s", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
     duration = get_window_in_sec(request.window)
 
     unit = "F" # we will keep the outside temperature in fahrenheit for now.
@@ -310,7 +316,7 @@ def get_raw_temperature_bands(request, pymortar_client):
 # TODO Make sure we don't include NONE values in the returned points.
 def get_raw_indoor_temperatures(request, pymortar_client):
     """Returns temperatures for the given request or None."""
-    print("received temperature request:", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
+    logging.info("received temperature request: %s %s %s %s %s %s", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
     duration = get_window_in_sec(request.window)
 
     unit = "F" # we will keep the outside temperature in fahrenheit for now.
@@ -364,7 +370,7 @@ def get_raw_indoor_temperatures(request, pymortar_client):
 
 def get_raw_modes(request, pymortar_client):
     """Returns modes for the given request or None."""
-    print("received mode request:", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
+    logging.info("received mode request: %s %s %s %s %s %s", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
     duration = get_window_in_sec(request.window)
 
     request_length = [len(request.building), len(request.zone), request.start, request.end,
@@ -421,7 +427,7 @@ def get_raw_modes(request, pymortar_client):
 
 def get_raw_actions(request, pymortar_client):
     """Returns actions for the given request or None."""
-    print("received action request:", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
+    logging.info("received action request: %s %s %s %s %s %s", request.building, request.zone, request.start, request.end, request.window, request.aggregation)
     duration = get_window_in_sec(request.window)
 
     request_length = [len(request.building), len(request.zone), request.start, request.end,
@@ -490,17 +496,25 @@ class IndoorDataHistoricalServicer(indoor_data_historical_pb2_grpc.IndoorDataHis
         Sends the indoor temperature for a given HVAC zone, within a timeframe (start, end), and a requested window
         An error is returned if there are no temperatures for the given request
         """
-        raw_temperatures, error = get_raw_indoor_temperatures(request, self.pymortar_client)
-        if raw_temperatures is None:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(error)
-            return indoor_data_historical_pb2.TemperaturePoint()
-        elif error is not None:
-            context.set_code(grpc.StatusCode.UNAVAILABLE)
-            context.set_details(error)
+        try:
+            raw_temperatures, error = get_raw_indoor_temperatures(request, self.pymortar_client)
+            if raw_temperatures is None:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(error)
+                return indoor_data_historical_pb2.TemperaturePoint()
+            elif error is not None:
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(error)
 
-        for temperature in raw_temperatures:
-            yield temperature
+            for temperature in raw_temperatures:
+                yield temperature
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error(tb)
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(tb)
+            return indoor_data_historical_pb2.TemperaturePoint()
+
 
     def GetRawTemperatureBands(self, request, context):
         """A simple RPC.
@@ -508,17 +522,24 @@ class IndoorDataHistoricalServicer(indoor_data_historical_pb2_grpc.IndoorDataHis
         Sends the indoor heating and cooling setpoints for a given HVAC zone, within a timeframe (start, end), and a requested window
         An error is returned if there are no setpoints for the given request
         """
-        raw_temperature_bands, error = get_raw_temperature_bands(request, self.pymortar_client)
-        if raw_temperature_bands is None:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(error)
-            return indoor_data_historical_pb2.Setpoint()
-        elif error is not None:
-            context.set_code(grpc.StatusCode.UNAVAILABLE)
-            context.set_details(error)
+        try:
+            raw_temperature_bands, error = get_raw_temperature_bands(request, self.pymortar_client)
+            if raw_temperature_bands is None:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(error)
+                return indoor_data_historical_pb2.Setpoint()
+            elif error is not None:
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(error)
 
-        for setpoint in raw_temperature_bands:
-            yield setpoint
+            for setpoint in raw_temperature_bands:
+                yield setpoint
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error(tb)
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(tb)
+            return indoor_data_historical_pb2.Setpoint()
 
     def GetRawActions(self, request, context):
         """A simple RPC.
@@ -526,17 +547,24 @@ class IndoorDataHistoricalServicer(indoor_data_historical_pb2_grpc.IndoorDataHis
          Sends the indoor action for a given HVAC Zone, within a timeframe (start, end), and a requested window
          An error is returned if there are no actions for the given request
          """
-        raw_actions, error = get_raw_actions(request, self.pymortar_client)
-        if raw_actions is None:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(error)
-            return indoor_data_historical_pb2.ActionPoint()
-        elif error is not None:
-            context.set_code(grpc.StatusCode.UNAVAILABLE)
-            context.set_details(error)
+         try:
+            raw_actions, error = get_raw_actions(request, self.pymortar_client)
+            if raw_actions is None:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(error)
+                return indoor_data_historical_pb2.ActionPoint()
+            elif error is not None:
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(error)
 
-        for action in raw_actions:
-            yield action
+            for action in raw_actions:
+                yield action
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error(tb)
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(tb)
+            return indoor_data_historical_pb2.ActionPoint()
 
     def GetRawModes(self, request, context):
         """A simple RPC.
@@ -544,17 +572,24 @@ class IndoorDataHistoricalServicer(indoor_data_historical_pb2_grpc.IndoorDataHis
          Sends the indoor mode for a given HVAC Zone, within a timeframe (start, end), and a requested window
          An error is returned if there are no modes for the given request
          """
-        raw_modes, error = get_raw_modes(request, self.pymortar_client)
-        if raw_modes is None:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(error)
-            return indoor_data_historical_pb2.ModePoint()
-        elif error is not None:
-            context.set_code(grpc.StatusCode.UNAVAILABLE)
-            context.set_details(error)
+        try:
+            raw_modes, error = get_raw_modes(request, self.pymortar_client)
+            if raw_modes is None:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(error)
+                return indoor_data_historical_pb2.ModePoint()
+            elif error is not None:
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(error)
 
-        for mode in raw_modes:
-            yield mode
+            for mode in raw_modes:
+                yield mode
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error(tb)
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(tb)
+            return indoor_data_historical_pb2.ModePoint()
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
